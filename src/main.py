@@ -17,12 +17,14 @@ import getpass
 
 class PasswordManager:
     def __init__(self):
-        f = open("config.yaml", "r")
-        config = yaml.load(f, Loader=yaml.FullLoader)
+        try:
+            f = open("config.yaml", "r")
+            config = yaml.load(f, Loader=yaml.FullLoader)
 
-        self.conn = psycopg2.connect(host=config['host'], port=config['port'],
-                                     database=config['database'], user=config['user'], password=config['password'])
-        self.cursor = self.conn.cursor()
+            self.conn = psycopg2.connect(host=config['host'], port=config['port'],
+                                         database=config['database'], user=config['user'], password=config['password'])
+        except (Exception, psycopg2.Error) as e:
+            print("Error occurred while connection to the database")
 
     def display_menu(self):
         ''' displays the menu '''
@@ -38,7 +40,11 @@ class PasswordManager:
         print("5. display all the information stored")
 
     def new_account(self):
-        """ """
+        """ 
+            adds new entry to the database
+            Details needed:
+                site name, username, email, password
+        """
         site = input("Enter site name: ")
         username = input("Enter username: ")
         email = input("Enter email: ")
@@ -51,23 +57,30 @@ class PasswordManager:
 
         # committing the changes
         self.conn.commit()
+        cursor.close()
+
+        print("new account created successfully👌\n")
 
     def update_password(self):
-        """ update the old passworld with new"""
-        site = input("Enter site name: ")
-        pw = input("Enter password: ")
-        confirm_pw = input("Confirm password: ")
+        """ update the old passworld with new one"""
+        site = input("Enter site name whose password you want to change: ")
+        password = input("Enter new password: ")
+        confirm_pw = input("Confirm new password: ")
 
-        if pw == confirm_pw:
-            query = f"""UPDATE accounts SET password =\'{pw}\' WHERE site=\'{site}\';"""
+        if password:
+            if password == confirm_pw:
+                query = f"""UPDATE accounts SET password =\'{password}\' WHERE site=\'{site}\';"""
 
-            cursor = self.conn.cursor()
-            cursor.execute(query)
-            # committing the changes
-            self.conn.commit()
+                cursor = self.conn.cursor()
+                cursor.execute(query)
 
+                # committing the changes
+
+                self.conn.commit()
+            else:
+                print("The password does not match! Try again")
         else:
-            print("The password does not match! Try again")
+            print("Password can not be empty. Try again")
 
     def find_link_with_email(self):
         """Number 3
@@ -80,8 +93,15 @@ class PasswordManager:
 
         print("\nRESULTS\n")
         print("\tSITE")
-        for i in cursor.fetchall():
-            print("\t" + i[0])
+        results = cursor.fetchall()
+        if email:
+            for i in results:
+                print("\t" + i[0])
+        else:
+            print("empty email")
+
+        # close the cursor
+        cursor.close()
 
     def find_password(self):
         """Number 4
@@ -96,16 +116,22 @@ class PasswordManager:
 
         print("\nRESULTS\n")
         print("PASSWORD")
-        for i in cursor.fetchall():
-            print("\t" + i[0])
+        results = cursor.fetchall()
+        if site:
+            for i in results:
+                print("\t" + i[0])
+        else:
+            print("Empty site name")
+        cursor.close()
 
     def display_accounts(self):
         ''' display all the information in the database'''
         # returns all the data in the accounts table
         query = """SELECT * FROM accounts;"""
 
-        self.cursor.execute(query)
-        info = self.cursor.fetchall()
+        cursor = self.conn.cursor()
+        cursor.execute(query)
+        info = cursor.fetchall()
 
         print("\n")
         print("RESULTS\n")
@@ -113,6 +139,7 @@ class PasswordManager:
 
         for i in info:
             print(f"{i[0]}\t\t{i[1]}\t{i[2]}\t\t{i[3]}")
+        cursor.close()
 
     def main(self):
         """ get the choice e.g.: 1 to exit etc
@@ -125,7 +152,8 @@ class PasswordManager:
                 choice = int(input("choose a number: "))
 
                 if choice == 0:
-                    self.cursor.close()
+                    self.conn.close()
+                    print("Closing things up. Exitting....")
                     sys.exit(0)
                 elif choice == 1:
                     self.new_account()
@@ -135,15 +163,15 @@ class PasswordManager:
                     self.find_link_with_email()
                 elif choice == 4:
                     self.find_password()
-                elif choice == 5:
+                else:
                     self.display_accounts()
-                elif choice == 3:
-                    self.find_link_with_email()
-            except KeyboardInterrupt:
+            except (Exception, KeyboardInterrupt):
+                print("sfasdasdasdasd")
+                self.conn.close()
                 sys.exit(0)
 
     def _encrypt_password(self, pw):
-        """encrpts the password provided"""
+        """encrypts the password provided"""
 
         salt = bcrypt.gensalt()
         pw = bcrypt.hashpw(pw.encode("utf-8"), salt)
@@ -158,32 +186,39 @@ class PasswordManager:
         """
         username = input("Create master username: ")
 
-        pw = ''
-        confirm_pw = ''
+        master_password = ''
+
         while True:
             # enter password until they match
             try:
-                pw = input("Enter password: ")
-                confirm_pw = input("Enter password: ")
+                password = getpass.getpass(prompt="create master password: ")
+                confirm_pw = getpass.getpass(
+                    prompt="confirm master password: ")
 
-                if pw == confirm_pw:
-                    break
+                if password:
+                    if password == confirm_pw:
+                        master_password = password
+                        break
+                    else:
+                        print("Password don't match. Try again!")
                 else:
-                    print("Password don't match. Try again!")
-            except:
-                print("error occurred. Please try again")
-                continue
+                    print("Empty password isn't accepted.")
+            except (Exception, KeyboardInterrupt):
+                print("\nerror occurred. Please try again")
+                sys.exit(0)
 
-        # encrypt password
-        encrypted_pw = self._encrypt_password(pw)
+        # ensuring that the masterpassword is not empty or None
+        if master_password:
+            # encrypt password
+            encrypted_pw = self._encrypt_password(master_password)
 
-        # insert the new information into the database
-        query = f"""INSERT INTO main (username, password) VALUES (\'{username}\', \'{encrypted_pw}\');"""
+            # insert the new information into the database
+            query = f"""INSERT INTO main (username, password) VALUES (\'{username}\', \'{encrypted_pw}\');"""
 
-        cursor = self.conn.cursor()
-        cursor.execute(query)
-        # commit/save the changes
-        self.conn.commit()
+            cursor = self.conn.cursor()
+            cursor.execute(query)
+            # commit/save the changes
+            self.conn.commit()
 
     def _authenticate(self, hashed_pw):
         """
